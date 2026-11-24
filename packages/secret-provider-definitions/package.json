@@ -1,0 +1,28 @@
+{
+  "name": "@lief/secret-provider-definitions",
+  "private": true,
+  "homepage": "https://github.com/LIAlia111/lief-code",
+  "bugs": {
+    "url": "https://github.com/LIAlia111/lief-code/issues"
+  },
+  "author": "Lief",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LIAlia111/lief-code",
+    "directory": "packages/secret-provider-definitions"
+  },
+  "type": "module",
+  "exports": {
+    "./registry": {
+      "types": "./src/registry.ts",
+      "import": "./src/registry.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "effect-tsgo tsrs --noEmit"
+  },
+  "dependencies": {
+    "@lief/secret-provider-core": "workspace:*",
+    "@lief/secret-provider-onepassword": "workspace:*"
+  }
+}

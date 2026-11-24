@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "ARK85ZXQ4Z.dev.lief.code",
+          "ARK85ZXQ4Z.dev.lief.code.preview",
+          "ARK85ZXQ4Z.dev.lief.code.dev"
+        ],
+        "components": [{ "/": "/threads/*" }]
+      }
+    ]
+  }
+}

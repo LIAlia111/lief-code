@@ -1,0 +1,55 @@
+{
+  "name": "@lief/provider-muse",
+  "private": true,
+  "homepage": "https://github.com/LIAlia111/lief-code",
+  "bugs": {
+    "url": "https://github.com/LIAlia111/lief-code/issues"
+  },
+  "author": "Lief",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LIAlia111/lief-code",
+    "directory": "packages/provider-muse"
+  },
+  "type": "module",
+  "exports": {
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts"
+    },
+    "./settings": {
+      "types": "./src/settings.ts",
+      "import": "./src/settings.ts"
+    },
+    "./server": {
+      "types": "./src/server.ts",
+      "import": "./src/server.ts"
+    },
+    "./server/usage": {
+      "types": "./src/server/usage.ts",
+      "import": "./src/server/usage.ts"
+    },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "import": "./src/testing.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "effect-tsgo tsrs --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "@lief/contracts": "workspace:*",
+    "@lief/provider-core": "workspace:*",
+    "@lief/shared": "workspace:*",
+    "@muse-code/sdk": "1.4.6",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@lief/provider-testing": "workspace:*",
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

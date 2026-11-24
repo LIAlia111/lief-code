@@ -1,0 +1,38 @@
+{
+  "name": "@lief/source-control-testing",
+  "private": true,
+  "homepage": "https://github.com/LIAlia111/lief-code",
+  "bugs": {
+    "url": "https://github.com/LIAlia111/lief-code/issues"
+  },
+  "author": "Lief",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LIAlia111/lief-code",
+    "directory": "packages/source-control-testing"
+  },
+  "type": "module",
+  "exports": {
+    "./fakeSourceControlDriver": {
+      "types": "./src/fakeSourceControlDriver.ts",
+      "import": "./src/fakeSourceControlDriver.ts"
+    },
+    "./TestSourceControlHost": {
+      "types": "./src/TestSourceControlHost.ts",
+      "import": "./src/TestSourceControlHost.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "effect-tsgo tsrs --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@lief/contracts": "workspace:*",
+    "@lief/shared": "workspace:*",
+    "@lief/source-control-core": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
+  }
+}

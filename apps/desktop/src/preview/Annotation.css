@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--lief-font-sans);
+  --font-mono: var(--lief-font-mono);
+  --color-background: var(--lief-background);
+  --color-foreground: var(--lief-foreground);
+  --color-popover: var(--lief-popover);
+  --color-popover-foreground: var(--lief-popover-foreground);
+  --color-primary: var(--lief-primary);
+  --color-primary-foreground: var(--lief-primary-foreground);
+  --color-muted: var(--lief-muted);
+  --color-muted-foreground: var(--lief-muted-foreground);
+  --color-accent: var(--lief-accent);
+  --color-accent-foreground: var(--lief-accent-foreground);
+  --color-border: var(--lief-border);
+  --color-input: var(--lief-input);
+  --color-ring: var(--lief-ring);
+  --radius-sm: calc(var(--lief-radius) - 4px);
+  --radius-md: calc(var(--lief-radius) - 2px);
+  --radius-lg: var(--lief-radius);
+  --radius-xl: calc(var(--lief-radius) + 4px);
+  --radius-2xl: calc(var(--lief-radius) + 8px);
+}
+
+:host {
+  --lief-font-sans:
+    "DM Sans Variable", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
+  --lief-font-mono:
+    "SF Mono", "SFMono-Regular", "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  --lief-radius: 0.5rem;
+  --lief-background: #f8f7f3;
+  --lief-foreground: #171c29;
+  --lief-popover: #fff;
+  --lief-popover-foreground: #171c29;
+  --lief-primary: #2547d5;
+  --lief-primary-foreground: white;
+  --lief-destructive: #c4322b;
+  --lief-ok: #1f8a5b;
+  --lief-muted: #f8f7f3;
+  --lief-muted-foreground: #535966;
+  --lief-accent: #e9eeff;
+  --lief-accent-foreground: #2547d5;
+  --lief-border: #dcdedc;
+  --lief-input: #dcdedc;
+  --lief-ring: #2547d5;
+  color: var(--lief-foreground);
+  font-family: var(--lief-font-sans);
+}
+
+@media (prefers-color-scheme: dark) {
+  :host {
+    --lief-background: #17191f;
+    --lief-foreground: #f2f3f8;
+    --lief-popover: #20232c;
+    --lief-popover-foreground: #f2f3f8;
+    --lief-primary: #a8b9ff;
+    --lief-primary-foreground: #101528;
+    --lief-destructive: #ff8a80;
+    --lief-ok: #6fd6a3;
+    --lief-muted: #17191f;
+    --lief-muted-foreground: #b7bdca;
+    --lief-accent: #283251;
+    --lief-accent-foreground: #a8b9ff;
+    --lief-border: #363b48;
+    --lief-input: #363b48;
+    --lief-ring: #a8b9ff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  border-color: var(--lief-border);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--lief-ring) 72%, transparent);
+  outline-offset: -2px;
+}
+
+/* Utility display classes must not override the native hidden state. */
+[hidden] {
+  display: none !important;
+}

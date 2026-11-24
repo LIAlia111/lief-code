@@ -1,0 +1,225 @@
+html:root[data-theme-id^="lief"] {
+  --font-sans:
+    "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  --radius: 8px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 14px;
+  --radius-3xl: 14px;
+  --radius-4xl: 14px;
+  --control-radius: 8px;
+  --glass-blur: 0px;
+  --glass-opacity: 100%;
+  --glass-saturation: 1;
+  --lief-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --lief-duration: 140ms;
+  --default-transition-duration: var(--lief-duration);
+  --default-transition-timing-function: var(--lief-ease);
+  --lief-selection: var(--app-theme-accent-surface);
+  --lief-overlay-shadow: 0 8px 24px rgba(10, 15, 30, 0.12);
+  --lief-dialog-shadow: 0 18px 50px rgba(10, 15, 30, 0.18);
+  --info: #a8b9ff;
+  --info-foreground: var(--info);
+  --v9-spring: var(--lief-ease);
+  --v9-ease-exit: var(--lief-ease);
+  --v9-ac: var(--lief-accent);
+  --v9-ac-soft: var(--muted);
+  --v9-ac-glow: var(--lief-selection);
+  --v9-surface: var(--card);
+  --v9-surface-2: var(--surface-raised, var(--card));
+  --v9-logo-bg: var(--card);
+  --v9-glass-strong: var(--popover);
+  --v9-fg: var(--foreground);
+  --v9-fg-2: var(--muted-foreground);
+  --v9-fg-3: var(--muted-foreground);
+  --v9-line: var(--border);
+  --v9-hair: var(--border);
+  --v9-fill: var(--muted);
+  --v9-fill-hover: var(--lief-selection);
+  --v9-sel-surface: var(--lief-selection);
+  --v9-ok: var(--success);
+  --v9-ok-bg: color-mix(in srgb, var(--success) 16%, transparent);
+  --v9-warn: var(--warning);
+  --v9-warn-bg: var(--warning-surface);
+  --v9-bad: var(--error);
+  --v9-bad-bg: var(--error-surface);
+  --v9-blue: var(--info);
+  --v9-blue-bg: color-mix(in srgb, var(--info) 16%, transparent);
+  --v9-shadow-float: var(--lief-overlay-shadow);
+  color-scheme: dark;
+}
+
+html:root[data-theme-id="lief-dark"] {
+  --lief-accent: var(--ring);
+  --lief-grid: rgba(255, 255, 255, 0.035);
+  --lief-overlay-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --lief-dialog-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+}
+
+html:root[data-theme-id="lief-light"] {
+  --lief-accent: var(--ring);
+  --lief-grid: rgba(0, 0, 0, 0.04);
+  --info: #2547d5;
+  color-scheme: light;
+}
+
+html:root[data-theme-id="lief-dark"]
+  :is(.bg-destructive, .bg-info, .bg-success, .bg-warning):is(
+    .text-white,
+    .text-background,
+    .text-primary-foreground,
+    .text-destructive-foreground,
+    .text-info-foreground,
+    .text-success-foreground,
+    .text-warning-foreground
+  ) {
+  color: var(--lief-primary-foreground);
+}
+
+html:root[data-theme-id^="lief"]
+  [data-slot="alert"].bg-warning-surface
+  [data-slot="alert-description"] {
+  color: var(--warning-foreground);
+}
+
+html:root[data-theme-id^="lief"] body {
+  font-family: var(--font-sans);
+}
+
+html:root[data-theme-id^="lief"],
+html:root[data-theme-id^="lief"] *,
+html:root[data-theme-id^="lief"] *::before,
+html:root[data-theme-id^="lief"] *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html:root[data-theme-id^="lief"] [data-slot="composer-host"],
+html:root[data-theme-id^="lief"] [data-thread-details-card] {
+  border: 1px solid var(--border);
+  background-color: var(--card);
+  background-image: none;
+  box-shadow: none;
+  border-radius: 12px;
+}
+
+html:root[data-theme-id^="lief"]
+  :is(
+    [data-slot="dialog-popup"]:not([data-dialog-variant="media"]),
+    [data-slot="alert-dialog-popup"],
+    [data-slot="command-dialog-popup"],
+    [data-slot="sheet-popup"]
+  ) {
+  border: 1px solid var(--border);
+  background-color: var(--popover);
+  background-image: none;
+  box-shadow: var(--lief-dialog-shadow);
+  border-radius: 14px;
+  outline: none;
+}
+
+html:root[data-theme-id^="lief"] [data-app-modal] {
+  box-shadow: var(--lief-dialog-shadow) !important;
+}
+
+html:root[data-theme-id^="lief"] [data-slot="sheet-popup"] {
+  box-shadow: var(--lief-overlay-shadow);
+}
+
+html:root[data-theme-id^="lief"] [data-slot="popover-popup"],
+html:root[data-theme-id^="lief"] [data-slot="menu-popup"] {
+  border: 1px solid var(--border);
+  background-color: var(--popover);
+  background-image: none;
+  box-shadow: var(--lief-overlay-shadow);
+  border-radius: 10px;
+  outline: none;
+}
+
+html:root[data-theme-id^="lief"]
+  [data-sidebar="sidebar"]
+  [data-sidebar-row].bg-sidebar-row-selected,
+html:root[data-theme-id^="lief"] [data-sidebar="sidebar"] [data-sidebar-row].bg-sidebar-row-active,
+html:root[data-theme-id^="lief"]
+  [data-sidebar="sidebar"]
+  [data-sidebar="menu-sub-button"].bg-sidebar-row-selected,
+html:root[data-theme-id^="lief"] [data-sidebar="sidebar"] [data-active="true"],
+html:root[data-theme-id^="lief"]
+  [data-sidebar="sidebar"]
+  [aria-current="page"]:not([data-sidebar-brand]) {
+  background-color: var(--card);
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+html:root[data-theme-id^="lief"] [data-sidebar-cap],
+html:root[data-theme-id^="lief"] [data-sidebar="group-label"],
+html:root[data-theme-id^="lief"] [data-slot="select-group-label"],
+html:root[data-theme-id^="lief"] [data-slot="command-group-label"],
+html:root[data-theme-id^="lief"] [data-slot="autocomplete-group-label"],
+html:root[data-theme-id^="lief"] [data-slot="menu-label"] {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--muted-foreground);
+}
+
+html:root[data-theme-id^="lief"] [role="img"],
+html:root[data-theme-id^="lief"] .tabular-nums {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+html:root[data-theme-id^="lief"] [role="img"] .bg-sky-500,
+html:root[data-theme-id^="lief"] [data-inbox-status="running"] > span {
+  background-color: var(--lief-accent);
+}
+
+html:root[data-theme-id^="lief"] [role="img"] .bg-sky-500.motion-safe\:animate-status-pulse,
+html:root[data-theme-id^="lief"] [data-inbox-status="running"] > span {
+  animation: none;
+}
+
+html:root[data-theme-id^="lief"] [role="img"] .bg-emerald-500,
+html:root[data-theme-id^="lief"] [data-inbox-status="done"] > span {
+  background-color: var(--success);
+}
+
+html:root[data-theme-id^="lief"] [role="img"] .bg-red-500,
+html:root[data-theme-id^="lief"] [data-inbox-status="failed"] > span {
+  background-color: var(--error);
+}
+
+html:root[data-theme-id^="lief"] [data-lief-newchat],
+html:root[data-theme-id^="lief"] [data-slot="empty"] {
+  background-image: none;
+}
+
+html:root[data-theme-id^="lief"] [data-lief-sky] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:root[data-theme-id^="lief"] *,
+  html:root[data-theme-id^="lief"] *::before,
+  html:root[data-theme-id^="lief"] *::after {
+    transition-duration: 0.01ms;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+  }
+}
+
+html:root[data-theme-id^="lief"]
+  :focus-visible:not([data-slot$="-popup"], input, textarea, select, [contenteditable="true"]) {
+  outline: 2px solid color-mix(in srgb, var(--ring) 75%, transparent);
+  outline-offset: -2px;
+}
+
+html:root[data-theme-id^="lief"] :is([data-slot="checkbox"], [data-slot="radio"]):focus-visible {
+  outline-offset: 2px;
+}

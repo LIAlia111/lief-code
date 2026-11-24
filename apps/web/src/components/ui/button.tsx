@@ -1,0 +1,137 @@
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
+import { cva, type VariantProps } from "class-variance-authority";
+import type * as React from "react";
+
+import { cn } from "~/lib/utils";
+
+const buttonVariants = cva(
+  "[--control-icon-color:currentColor] [&_svg]:-mx-0.5 relative inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-lg border font-medium text-base outline-none transition-colors pointer-coarse:after:absolute pointer-coarse:after:size-full pointer-coarse:after:min-h-11 pointer-coarse:after:min-w-11 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-64 aria-disabled:cursor-not-allowed aria-disabled:opacity-64 sm:text-sm [&_svg:not([class*='text-'])]:text-(color:--control-icon-color) [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  {
+    defaultVariants: {
+      size: "default",
+      variant: "default",
+    },
+    variants: {
+      size: {
+        "annotation-pill": "h-8 rounded-full px-3",
+        compact: "h-7 gap-1 rounded-md px-1.75 text-xs [&_svg:not([class*='size-'])]:size-3.5",
+        default: "h-9 px-2.75 sm:h-8",
+        icon: "size-9 sm:size-8",
+        "icon-lg": "size-10 sm:size-9",
+        "icon-micro": "size-5 rounded-sm p-0 [&_svg:not([class*='size-'])]:size-3",
+        "icon-tiny": "size-4 p-0 [&_svg:not([class*='size-'])]:size-3",
+        "icon-sm": "size-8 sm:size-7",
+        "icon-sm-pill": "size-8 rounded-full sm:size-7",
+        "icon-xl":
+          "size-11 sm:size-10 [&_svg:not([class*='size-'])]:size-5 sm:[&_svg:not([class*='size-'])]:size-4.5",
+        "icon-xs":
+          "size-7 sm:size-6 not-in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-4 sm:not-in-data-[slot=input-group]:[&_svg:not([class*='size-'])]:size-3.5",
+        lg: "h-10 px-3.25 sm:h-9",
+        micro:
+          "h-5 gap-1 rounded-sm px-1.25 text-2xs sm:text-2xs [&_svg:not([class*='size-'])]:size-3 sm:[&_svg:not([class*='size-'])]:size-3",
+        multiline: "min-h-9 px-2.75 py-1.25 whitespace-normal sm:min-h-8",
+        sm: "h-8 gap-1.5 px-2.25 sm:h-7",
+        "sm-pill": "h-8 gap-1.5 rounded-full px-2.5 sm:h-7",
+        "sm-multiline": "min-h-8 gap-1.5 px-2.25 py-0.75 whitespace-normal sm:min-h-7",
+        xl: "h-11 px-3.75 text-lg sm:h-10 sm:text-base [&_svg:not([class*='size-'])]:size-5 sm:[&_svg:not([class*='size-'])]:size-4.5",
+        xs: "h-7 gap-1 px-1.75 text-sm sm:h-6 sm:text-xs [&_svg:not([class*='size-'])]:size-4 sm:[&_svg:not([class*='size-'])]:size-3.5",
+      },
+      variant: {
+        annotation:
+          "border-transparent bg-annotation text-white [:hover,[data-pressed]]:bg-annotation/90",
+        "annotation-send":
+          "border-transparent bg-foreground text-background transition-[width] duration-400 ease-drawer motion-reduce:transition-none",
+        default:
+          "border-transparent bg-primary text-primary-foreground [:hover,[data-pressed]]:bg-message-action-hover",
+        destructive:
+          "border-transparent bg-destructive text-white [:hover,[data-pressed]]:bg-destructive/90",
+        "destructive-outline":
+          "border-destructive/40 bg-transparent text-destructive-foreground [:hover,[data-pressed]]:bg-accent",
+        ghost: "border-transparent text-foreground [:hover,[data-pressed]]:bg-accent",
+        "ghost-muted":
+          "border-transparent text-muted-foreground [:hover,[data-pressed]]:bg-accent [:hover,[data-pressed]]:text-foreground",
+        "ghost-destructive":
+          "border-transparent text-muted-foreground [:hover,[data-pressed]]:bg-accent [:hover,[data-pressed]]:text-destructive",
+        glass:
+          "rounded-full border-border bg-card text-foreground [:hover,[data-pressed]]:bg-accent",
+        link: "border-transparent text-primary underline-offset-4 [:hover,[data-pressed]]:underline",
+        "media-close":
+          "border-white/20 bg-black/65 text-white [:hover,[data-pressed]]:bg-black/80 focus-visible:ring-white",
+        "media-navigation":
+          "absolute top-1/2 z-20 -translate-y-1/2 border-transparent text-white/90 [:hover,[data-pressed]]:bg-white/10 [:hover,[data-pressed]]:text-white focus-visible:ring-white focus-visible:ring-offset-transparent",
+        outline: "border-border bg-card text-foreground [:hover,[data-pressed]]:bg-accent",
+        overlay: "border-transparent bg-black/70 text-white/65 [:hover,[data-pressed]]:bg-black/90",
+        secondary: "border-border bg-card text-foreground [:hover,[data-pressed]]:bg-accent",
+        "warning-outline":
+          "border-warning/40 bg-transparent text-warning-foreground [:hover,[data-pressed]]:bg-warning-surface",
+      },
+    },
+  },
+);
+
+type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>;
+type ButtonSize = NonNullable<VariantProps<typeof buttonVariants>["size"]>;
+
+interface ButtonProps extends useRender.ComponentProps<"button"> {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+}
+
+function Button({ className, variant, size, render, ...props }: ButtonProps) {
+  const typeValue: React.ButtonHTMLAttributes<HTMLButtonElement>["type"] = render
+    ? undefined
+    : "button";
+
+  const defaultProps = {
+    className: cn(buttonVariants({ className, size, variant })),
+    "data-slot": "button",
+    type: typeValue,
+  };
+
+  return useRender({
+    defaultTagName: "button",
+    props: mergeProps<"button">(defaultProps, props),
+    render,
+  });
+}
+
+export { Button, buttonVariants, type ButtonSize, type ButtonVariant };
+
+const inlineButtonVariants = cva(
+  "inline-flex shrink-0 cursor-pointer items-center gap-0.5 font-medium underline-offset-2 [text-align:var(--inline-button-text-align,center)] [white-space:var(--inline-button-white-space,nowrap)] hover:underline focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-64",
+  {
+    defaultVariants: { tone: "default" },
+    variants: {
+      touchTarget: {
+        padded: "pointer-coarse:min-h-11 pointer-coarse:px-1.5",
+      },
+      tone: {
+        default: "text-foreground",
+        muted: "text-muted-foreground hover:text-foreground",
+        destructive: "text-destructive/80 hover:text-destructive",
+        picker:
+          "gap-1 text-foreground decoration-from-font underline-offset-4 data-popup-open:underline",
+      },
+    },
+  },
+);
+
+export function InlineButton({
+  className,
+  tone,
+  touchTarget,
+  render,
+  ...props
+}: useRender.ComponentProps<"button"> & VariantProps<typeof inlineButtonVariants>) {
+  const defaultProps = {
+    className: cn(inlineButtonVariants({ tone, touchTarget }), className),
+    "data-slot": "inline-button",
+    type: render ? undefined : ("button" as const),
+  };
+  return useRender({
+    defaultTagName: "button",
+    props: mergeProps<"button">(defaultProps, props),
+    render,
+  });
+}

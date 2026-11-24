@@ -1,0 +1,28 @@
+{
+  "name": "@lief/oxlint-plugin-lief",
+  "private": true,
+  "homepage": "https://github.com/LIAlia111/lief-code",
+  "bugs": {
+    "url": "https://github.com/LIAlia111/lief-code/issues"
+  },
+  "author": "Lief",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LIAlia111/lief-code",
+    "directory": "oxlint-plugin-lief"
+  },
+  "type": "module",
+  "scripts": {
+    "typecheck": "effect-tsgo tsrs --noEmit",
+    "test": "vp test run --config ../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "@oxlint/plugins": "^1.63.0",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

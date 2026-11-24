@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="864" viewBox="0 0 640 432">
+  <rect width="640" height="432" fill="#f8f7f3"/>
+  <g transform="translate(288 142) scale(1)" aria-label="Lief.code">
+    <rect width="64" height="64" rx="14" fill="#2547d5"/>
+    <g transform="translate(32 32) skewX(-10) translate(-32 -32)">
+      <path d="M20 14h9v27h17v9H20z" fill="#fff"/>
+    </g>
+    <circle cx="53" cy="45.5" r="4" fill="#a8b9ff"/>
+  </g>
+  <text x="320" y="252" fill="#171c29" font-family="-apple-system,BlinkMacSystemFont,Helvetica,sans-serif" font-size="26" font-weight="600" letter-spacing="-.5" text-anchor="middle">Lief.code</text>
+</svg>

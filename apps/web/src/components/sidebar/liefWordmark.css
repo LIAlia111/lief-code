@@ -1,0 +1,17 @@
+/*
+ * V11 logo A: "Lief Lief" in the app icon's holographic blue → violet → rose → amber.
+ * The gradient is one seamless period (first stop == last stop) tiled twice the text width and
+ * scrolled by exactly one period with linear timing, so the sheen flows left → right without a
+ * pause, a restart jump, or a second color pass.
+ */
+[data-lief-wordmark] {
+  color: var(--foreground);
+}
+[data-lief-wordmark][data-on-backdrop] {
+  color: var(--foreground);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-lief-wordmark] {
+    animation: none;
+  }
+}

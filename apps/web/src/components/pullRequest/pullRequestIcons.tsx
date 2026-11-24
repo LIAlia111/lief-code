@@ -1,0 +1,55 @@
+import {
+  GitMergeIcon,
+  GitPullRequestArrowIcon,
+  GitPullRequestClosedIcon,
+  GitPullRequestDraftIcon,
+  LayersIcon,
+  Link2Icon,
+  Unlink2Icon,
+  TriangleAlertIcon,
+} from "~/components/icons";
+import type { PullRequestState } from "@lief/contracts";
+import { msg } from "gt-react";
+
+export const PullRequestGlyph = {
+  pullRequest: GitPullRequestArrowIcon,
+  reopen: GitPullRequestArrowIcon,
+  draft: GitPullRequestDraftIcon,
+  closed: GitPullRequestClosedIcon,
+  merged: GitMergeIcon,
+  conflicting: TriangleAlertIcon,
+  stack: LayersIcon,
+  link: Link2Icon,
+  unlink: Unlink2Icon,
+} as const;
+
+export type PullRequestGlyphIcon = (typeof PullRequestGlyph)[keyof typeof PullRequestGlyph];
+
+export interface PullRequestStatePresentation {
+  readonly label: string;
+  readonly toneClassName: string;
+  readonly Icon: PullRequestGlyphIcon;
+}
+
+export const PULL_REQUEST_STATE_PRESENTATION = {
+  open: {
+    label: msg("Open", { $context: "pull request state" }),
+    toneClassName: "text-success",
+    Icon: PullRequestGlyph.pullRequest,
+  },
+  draft: {
+    label: msg("Draft", { $context: "pull request state" }),
+    toneClassName: "text-muted-foreground",
+    Icon: PullRequestGlyph.draft,
+  },
+  closed: {
+    label: msg("Closed", { $context: "pull request state" }),
+    toneClassName: "text-destructive",
+    Icon: PullRequestGlyph.closed,
+  },
+  merged: {
+    label: msg("Merged", { $context: "pull request state" }),
+    toneClassName: "text-primary",
+    Icon: PullRequestGlyph.merged,
+  },
+} as const satisfies Record<PullRequestState | "draft", PullRequestStatePresentation>;

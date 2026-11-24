@@ -1,0 +1,62 @@
+/* Rail appearance for the session statistics entries. The dock pill stays on the default bar. */
+
+[data-session-stats][data-session-stats-appearance="rail"] {
+  display: block;
+  min-height: 0;
+  margin-top: 0;
+  container-type: normal;
+}
+
+[data-session-stats][data-session-stats-appearance="rail"] [data-v9-stats-cluster] {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  gap: 2px;
+  padding: 0;
+  border-radius: 0;
+}
+
+[data-session-stats][data-session-stats-appearance="rail"] [data-v9-stats-dock-pill],
+[data-session-stats][data-session-stats-appearance="rail"] [data-v9-stats-sep],
+[data-session-stats][data-session-stats-appearance="rail"] [data-v9-stats-narrow],
+[data-session-stats][data-session-stats-appearance="rail"] [data-v9-stats-dot] {
+  display: none;
+}
+
+[data-session-stats][data-session-stats-appearance="rail"] [data-v9-stats-wide] {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+[data-session-stats][data-session-stats-appearance="rail"] [data-v9-stats-trig] {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 28px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--foreground);
+  font-size: var(--text-lief-body);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+[data-session-stats][data-session-stats-appearance="rail"] [data-v9-stats-trig]:hover,
+[data-session-stats][data-session-stats-appearance="rail"] [data-v9-stats-trig][data-popup-open] {
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+[data-session-stats][data-session-stats-appearance="rail"] [data-session-stats-label] {
+  flex: none;
+  color: var(--foreground);
+}

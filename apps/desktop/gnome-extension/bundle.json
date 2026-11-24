@@ -1,0 +1,10 @@
+{
+  "uuid": "snap-shot@lief.code",
+  "files": [
+    "metadata.json",
+    "extension.js",
+    "captureService.js",
+    "captureFeedback.js",
+    "feedbackGeometry.js"
+  ]
+}

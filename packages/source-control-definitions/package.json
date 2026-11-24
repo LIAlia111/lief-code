@@ -1,0 +1,28 @@
+{
+  "name": "@lief/source-control-definitions",
+  "private": true,
+  "homepage": "https://github.com/LIAlia111/lief-code",
+  "bugs": {
+    "url": "https://github.com/LIAlia111/lief-code/issues"
+  },
+  "author": "Lief",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LIAlia111/lief-code",
+    "directory": "packages/source-control-definitions"
+  },
+  "type": "module",
+  "exports": {
+    "./registry": {
+      "types": "./src/registry.ts",
+      "import": "./src/registry.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "effect-tsgo tsrs --noEmit"
+  },
+  "dependencies": {
+    "@lief/source-control-core": "workspace:*",
+    "@lief/source-control-github": "workspace:*"
+  }
+}

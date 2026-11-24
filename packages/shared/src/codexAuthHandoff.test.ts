@@ -1,0 +1,117 @@
+import { describe, expect, it } from "vite-plus/test";
+import { EnvironmentId, ProviderInstanceId } from "@lief/contracts";
+import {
+  codexAuthorizationRequest,
+  codexAuthDeliveryUrl,
+  codexAuthHandoffUrl,
+  codexCallbackUrl,
+  readCodexAuthDelivery,
+  readCodexAuthHandoff,
+} from "./codexAuthHandoff.ts";
+
+const authorizationUrl = () => {
+  const url = new URL("https://auth.openai.com/api/accounts/authorize");
+  url.search = new URLSearchParams({
+    client_id: "dynamic_agent_client",
+    response_type: "code",
+    redirect_uri: "http://127.0.0.1:54213/auth/callback",
+    state: "a".repeat(43),
+    code_challenge_method: "S256",
+    code_challenge: "b".repeat(43),
+  }).toString();
+  return url.toString();
+};
+const input = {
+  authorizationUrl: authorizationUrl(),
+  returnUrl: "http://127.0.0.1:3000/welcome#agents:remote-environment",
+  environmentId: EnvironmentId.make("remote-environment"),
+  instanceId: ProviderInstanceId.make("work-codex"),
+  flowId: "flow-one",
+};
+const callbackUrl = `http://127.0.0.1:54213/auth/callback?state=${"a".repeat(43)}&code=one-time-code&client_id=oaiapp_test`;
+
+describe("Codex desktop handoff", () => {
+  it("keeps the local web return route, account, and environment with the code in a fragment", () => {
+    const handoffUrl = codexAuthHandoffUrl(input);
+    expect(new URL(handoffUrl).protocol).toBe("lief-code:");
+    expect(readCodexAuthHandoff(handoffUrl, false)).toEqual(input);
+    expect(readCodexAuthHandoff(handoffUrl.replace("lief-code:", "LIEF-CODE:"), false)).toEqual(
+      input,
+    );
+    const delivery = codexAuthDeliveryUrl(input, callbackUrl);
+    expect(new URL(delivery).search).toBe("");
+    expect(readCodexAuthDelivery(delivery)).toEqual({
+      callbackUrl,
+      environmentId: input.environmentId,
+      instanceId: input.instanceId,
+      flowId: input.flowId,
+      returnHash: "#agents:remote-environment",
+      returnUrl: input.returnUrl,
+    });
+  });
+  it("rejects other handlers, schemes, arbitrary return sites, and non-OpenAI authorization", () => {
+    const link = codexAuthHandoffUrl(input);
+    expect(readCodexAuthHandoff(link, true)).toBeUndefined();
+    expect(readCodexAuthHandoff(link.replace("auth/codex", "auth/other"), false)).toBeUndefined();
+    expect(() =>
+      codexAuthHandoffUrl({ ...input, returnUrl: "https://attacker.example/welcome" }),
+    ).toThrow();
+    const untrusted = new URL(link);
+    for (const returnUrl of ["https://attacker.example/welcome", "lief-code-dev://app/welcome"]) {
+      untrusted.searchParams.set("request", JSON.stringify({ ...input, returnUrl }));
+      expect(readCodexAuthHandoff(untrusted.toString(), false)).toBeUndefined();
+    }
+    expect(
+      readCodexAuthHandoff(
+        codexAuthHandoffUrl({
+          ...input,
+          authorizationUrl: input.authorizationUrl.replace("auth.openai.com", "attacker.example"),
+        }),
+        false,
+      ),
+    ).toBeUndefined();
+  });
+  it("strips unrelated return URL parameters when writing and reading a handoff", () => {
+    const returnUrl = "http://127.0.0.1:3000/settings/providers?instanceId=work";
+    const request = { ...input, returnUrl: `${returnUrl}&token=sentinel#private` };
+    const link = new URL(codexAuthHandoffUrl(request));
+    expect(JSON.parse(link.searchParams.get("request")!)).toEqual({ ...input, returnUrl });
+    link.searchParams.set("request", JSON.stringify(request));
+    expect(readCodexAuthHandoff(link.toString(), false)).toEqual({ ...input, returnUrl });
+  });
+  it("rejects duplicated authorization parameters and non-loopback callback addresses", () => {
+    expect(() =>
+      codexAuthorizationRequest(
+        input.authorizationUrl + "&redirect_uri=http://localhost:1/auth/callback",
+      ),
+    ).toThrow();
+    const url = new URL(input.authorizationUrl);
+    url.searchParams.set("redirect_uri", "http://localhost:54213/auth/callback");
+    expect(() => codexAuthorizationRequest(url.toString())).toThrow();
+    url.searchParams.set("redirect_uri", "https://attacker.example/auth/callback");
+    expect(() => codexAuthorizationRequest(url.toString())).toThrow();
+    expect(() => codexAuthDeliveryUrl(input, callbackUrl + "&state=another")).toThrow();
+  });
+});
+
+describe("pasted Codex callback", () => {
+  const { redirectUri, state } = codexAuthorizationRequest(input.authorizationUrl);
+  const copied = callbackUrl.slice("http://".length);
+
+  it("accepts a callback copied without its scheme", () => {
+    expect(codexCallbackUrl(copied, redirectUri, state).toString()).toBe(callbackUrl);
+  });
+  it("accepts leading whitespace with or without a scheme", () => {
+    expect(codexCallbackUrl(` \t\n${callbackUrl}`, redirectUri, state).toString()).toBe(
+      callbackUrl,
+    );
+    expect(codexCallbackUrl(` \t\n${copied}`, redirectUri, state).toString()).toBe(callbackUrl);
+  });
+  it("still rejects a scheme-less callback for another address or sign-in", () => {
+    expect(() =>
+      codexCallbackUrl(copied.replace("127.0.0.1", "localhost"), redirectUri, state),
+    ).toThrow();
+    expect(() => codexCallbackUrl(copied.replace("54213", "54214"), redirectUri, state)).toThrow();
+    expect(() => codexCallbackUrl(`${copied}&state=another`, redirectUri, state)).toThrow();
+  });
+});

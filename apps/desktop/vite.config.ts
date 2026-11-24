@@ -1,0 +1,186 @@
+import "vite-plus/test/config";
+import * as NodeOS from "node:os";
+
+import { defaultInclude, defineConfig } from "vite-plus";
+
+import { isDesktopRuntimeExternalDependency } from "../../scripts/lib/desktop-external-packages.ts";
+
+const domTests = ["src/preview/PickPreload.test.ts"];
+
+// Install only bundle externals; the server bundle already carries its dependency tree.
+const isMainProcessExternal = (id: string) =>
+  id === "electron" || id.startsWith("electron/") || isDesktopRuntimeExternalDependency(id);
+const shouldLaunchElectronAfterPack = process.env.LIEF_DESKTOP_DEV === "1";
+// tsdown runs onSuccess through a shell. dash forks instead of exec'ing the last command, which
+// would leave an `sh` between `vp pack` and the supervisor and hide `vp pack` dying from it.
+const devElectronCommand =
+  // oxlint-disable-next-line lief/no-global-process-runtime -- Build config has no Effect runtime.
+  NodeOS.platform() === "win32"
+    ? "node scripts/dev-electron.mjs"
+    : "exec node scripts/dev-electron.mjs";
+
+export default defineConfig({
+  run: {
+    tasks: {
+      build: {
+        command:
+          "node scripts/build-browser-secret.mjs && node scripts/build-apple-speech.mjs && node scripts/build-preview-annotation-css.mjs && vp pack",
+        dependsOn: ["lief-code#build"],
+        cache: false,
+      },
+      // CI bundle jobs skip the Linux browser secret helper; packaging stages one per arch.
+      "build:bundle": {
+        command: "node scripts/build-preview-annotation-css.mjs && vp pack",
+        dependsOn: ["lief-code#build"],
+        cache: false,
+      },
+      dev: {
+        command:
+          "node scripts/build-browser-secret.mjs && node scripts/build-apple-speech.mjs && node scripts/build-preview-annotation-css.mjs && cross-env LIEF_DESKTOP_DEV=1 vp pack --watch",
+        dependsOn: ["lief-code#build"],
+        cache: false,
+      },
+      "dev:bundle": {
+        command:
+          "node scripts/build-browser-secret.mjs && node scripts/build-apple-speech.mjs && node scripts/build-preview-annotation-css.mjs && vp pack --watch",
+        cache: false,
+      },
+      "dev:electron": {
+        command: "node scripts/dev-electron.mjs",
+        dependsOn: ["lief-code#build"],
+        cache: false,
+      },
+      // A local tsbuildinfo is leftover build state, not a typecheck input.
+      typecheck: {
+        command: "effect-tsgo tsrs --noEmit",
+        cache: { input: [{ auto: true }, "!*.tsbuildinfo"] },
+      },
+    },
+  },
+  pack: [
+    {
+      format: "cjs",
+      outDir: "dist-electron",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      outputOptions: { codeSplitting: false },
+      entry: ["src/main.ts"],
+      clean: true,
+      deps: {
+        alwaysBundle: (id) => !id.startsWith("node:") && !isMainProcessExternal(id),
+        neverBundle: isMainProcessExternal,
+        onlyBundle: false,
+      },
+      ...(shouldLaunchElectronAfterPack ? { onSuccess: devElectronCommand } : {}),
+    },
+    {
+      format: "cjs",
+      outDir: "dist-electron",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: [
+        "src/electron/WindowsForegroundFocusWorker.ts",
+        "src/snapShot/GlobalShiftShortcutWorker.ts",
+        "src/snapShot/RegionSnapShotWorker.ts",
+        "src/snapShot/SnapShotAccessibilityWorker.ts",
+      ],
+      clean: false,
+      deps: {
+        alwaysBundle: (id) => !id.startsWith("node:") && !isMainProcessExternal(id),
+        neverBundle: isMainProcessExternal,
+        onlyBundle: false,
+      },
+    },
+    {
+      // boot.cjs requires the other two at runtime, so all three stay separate files.
+      format: "cjs",
+      outDir: "dist-electron",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: ["src/boot.ts", "src/compileCache.ts", "src/serverCompileCache.ts"],
+      clean: false,
+      deps: {
+        neverBundle: (id) => id === "./main.cjs" || id === "./compileCache.cjs",
+      },
+    },
+    {
+      format: "cjs",
+      outDir: "dist-electron",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: ["src/preload.ts"],
+    },
+    {
+      format: "cjs",
+      outDir: "dist-electron",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: ["src/preview-pick-preload.ts"],
+      deps: {
+        alwaysBundle: (id) =>
+          id === "react-grab" ||
+          id.startsWith("react-grab/") ||
+          id === "@lief/shared/keybindingMatching" ||
+          id === "@lief/shared/previewPins",
+      },
+    },
+    {
+      format: "cjs",
+      outDir: "dist-electron",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: ["src/preview-pip-preload.ts"],
+    },
+    {
+      // Sandboxed preloads must be self-contained, without shared runtime chunks.
+      format: "cjs",
+      outDir: "dist-electron",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: ["src/mac-permission-preload.ts"],
+    },
+  ],
+  test: {
+    // The Windows lane runs workspace suites concurrently; filesystem-heavy
+    // desktop integration tests can exceed Vitest's 5 second default there.
+    testTimeout: 15_000,
+    // `require("electron")` downloads a missing binary, so concurrent workers race to
+    // extract it into the same dist/. Install it once before any worker starts.
+    globalSetup: ["./scripts/ensure-electron-runtime.mjs"],
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          include: [...defaultInclude, "../../native/kde-snap-shot/src/*.test.ts"],
+          exclude: ["**/node_modules/**", ...domTests],
+          setupFiles: [
+            "../../packages/shared/src/testing/longTempDir.ts",
+            "../../packages/shared/src/testing/providerEnv.ts",
+            "../../packages/shared/src/testing/gitEnv.ts",
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "dom",
+          include: domTests,
+          // Guest preloads run in the page; these tests drive them against a DOM.
+          environment: "jsdom",
+          setupFiles: [
+            "../../packages/shared/src/testing/providerEnv.ts",
+            "../../packages/shared/src/testing/gitEnv.ts",
+          ],
+        },
+      },
+    ],
+  },
+});

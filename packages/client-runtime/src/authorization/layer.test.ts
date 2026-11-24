@@ -1,0 +1,874 @@
+import { describe, expect, it } from "@effect/vitest";
+import {
+  AuthStandardClientScopes,
+  EnvironmentId,
+  ORCHESTRATION_PROTOCOL_VERSION,
+  type ExecutionEnvironmentDescriptor,
+} from "@lief/contracts";
+import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+import * as TestClock from "effect/testing/TestClock";
+
+import {
+  BearerConnectionCredential,
+  BearerConnectionProfile,
+  DpopConnectionCredential,
+  type ConnectionCredential,
+} from "../connection/catalog.ts";
+import * as ConnectionCredentialStore from "../connection/credentialStore.ts";
+import { BearerConnectionTarget } from "../connection/model.ts";
+import * as ConnectionProfileStore from "../connection/profileStore.ts";
+import * as ConnectionResolver from "../connection/resolver.ts";
+import * as ClientCapabilities from "../platform/capabilities.ts";
+import * as RpcHttp from "../rpc/http.ts";
+import * as DpopSigner from "./dpopSigner.ts";
+import * as RemoteEnvironmentAuthorization from "./service.ts";
+
+const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
+const ENDPOINT = {
+  httpBaseUrl: "https://remote.example.com",
+  wsBaseUrl: "wss://remote.example.com",
+};
+const DIRECT_CONNECTION = { connectionId: "direct-1", httpBaseUrl: ENDPOINT.httpBaseUrl };
+const DESCRIPTOR = {
+  environmentId: ENVIRONMENT_ID,
+  label: "Remote environment",
+  platform: {
+    os: "linux",
+    arch: "x64",
+  },
+  serverVersion: "0.0.0-test",
+  capabilities: {
+    repositoryIdentity: true,
+  },
+};
+
+type RecordedResponse = Response | ((init: RequestInit) => Response | Promise<Response>);
+
+function recordedFetch(responses: ReadonlyArray<RecordedResponse>, descriptor?: object) {
+  const calls: Array<readonly [RequestInfo | URL, RequestInit]> = [];
+  let responseIndex = 0;
+  const fetchFn = ((input, init) => {
+    calls.push([input, init ?? {}]);
+    if (descriptor !== undefined && String(input).endsWith("/.well-known/lief/environment")) {
+      return Promise.resolve(Response.json(descriptor));
+    }
+    const response = responses[responseIndex++];
+    return response === undefined
+      ? Promise.reject(new Error(`Unexpected fetch call to ${String(input)}`))
+      : Promise.resolve(typeof response === "function" ? response(init ?? {}) : response);
+  }) satisfies typeof fetch;
+  return { calls, fetchFn };
+}
+
+const websocketTicket = (ticket: string) =>
+  Response.json({
+    ticket,
+    expiresAt: "2026-06-06T01:00:00.000Z",
+  });
+
+const accessToken = (token: string, scope = AuthStandardClientScopes.join(" ")) =>
+  Response.json({
+    access_token: token,
+    issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
+    token_type: "DPoP",
+    expires_in: 3_600,
+    scope,
+  });
+
+const authInvalid = () =>
+  Response.json(
+    {
+      _tag: "EnvironmentAuthInvalidError",
+      code: "auth_invalid",
+      reason: "invalid_credential",
+      traceId: "trace-auth-invalid",
+    },
+    { status: 401 },
+  );
+
+function heldResponse() {
+  const started = Promise.withResolvers<void>();
+  const result = Promise.withResolvers<Response>();
+  return {
+    started: Effect.promise(() => started.promise),
+    respond: result.resolve,
+    response: () => {
+      started.resolve();
+      return result.promise;
+    },
+  };
+}
+
+function directCredential(accessToken: string, expiresAtEpochMs: number) {
+  return [
+    DIRECT_CONNECTION.connectionId,
+    new DpopConnectionCredential({ accessToken, expiresAtEpochMs }),
+  ] as const;
+}
+
+const makeHarness = Effect.fn("TestRemoteAuthorization.makeHarness")(function* (input: {
+  readonly responses: ReadonlyArray<RecordedResponse>;
+  readonly descriptor?: object;
+  readonly credentials?: ReadonlyArray<readonly [string, ConnectionCredential]>;
+}) {
+  const thumbprint = yield* Ref.make("thumbprint-1");
+  const proofInputs = yield* Ref.make<ReadonlyArray<DpopSigner.DpopProofInput>>([]);
+  const fetch = recordedFetch(input.responses, input.descriptor);
+  const signer = DpopSigner.DpopSigner.of({
+    thumbprint: Ref.get(thumbprint),
+    createProof: (input) =>
+      Ref.update(proofInputs, (values) => [...values, input]).pipe(
+        Effect.andThen(Ref.get(thumbprint)),
+        Effect.map((key) => `proof:${key}:${input.url}`),
+      ),
+  });
+  const layer = RemoteEnvironmentAuthorization.layer.pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(
+        RpcHttp.layerRemoteHttpClient(fetch.fetchFn),
+        Layer.succeed(DpopSigner.DpopSigner, signer),
+        ConnectionCredentialStore.layerMemory(input.credentials),
+        Layer.succeed(ClientCapabilities.ClientPresentation, {
+          metadata: { label: "Lief.code Test", deviceType: "desktop", os: "test" },
+        }),
+      ),
+    ),
+  );
+  return { layer, proofInputs, fetch, thumbprint };
+});
+
+const prepareDirectBearer = Effect.fn("TestRemoteAuthorization.prepareDirectBearer")(function* (
+  harness: Effect.Success<ReturnType<typeof makeHarness>>,
+  times: number,
+) {
+  const target = new BearerConnectionTarget({
+    environmentId: ENVIRONMENT_ID,
+    label: DESCRIPTOR.label,
+    connectionId: "direct-1",
+  });
+  const entry = {
+    target,
+    profile: Option.some(
+      new BearerConnectionProfile({
+        connectionId: target.connectionId,
+        environmentId: ENVIRONMENT_ID,
+        label: target.label,
+        httpBaseUrl: ENDPOINT.httpBaseUrl,
+        wsBaseUrl: ENDPOINT.wsBaseUrl,
+      }),
+    ),
+    enabled: true,
+  };
+  const unused = () => Effect.die("unused");
+  const layer = ConnectionResolver.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        harness.layer,
+        Layer.succeed(ConnectionProfileStore.ConnectionProfileStore, {
+          get: unused,
+          put: unused,
+          remove: unused,
+        }),
+        Layer.succeed(ConnectionCredentialStore.ConnectionCredentialStore, {
+          get: () => Effect.succeedSome(new BearerConnectionCredential({ token: "bearer-token" })),
+          put: unused,
+          remove: unused,
+        }),
+        Layer.succeed(ClientCapabilities.PrimaryEnvironmentAuth, {
+          bearerToken: Effect.succeedNone,
+        }),
+        Layer.succeed(ClientCapabilities.SshEnvironmentGateway, {
+          provision: unused,
+          prepare: unused,
+          disconnect: unused,
+        }),
+      ),
+    ),
+  );
+  const resolver = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(layer));
+  return yield* Effect.forEach(Array.from({ length: times }), () =>
+    resolver.prepare(entry).pipe(Effect.result),
+  );
+});
+
+describe("RemoteEnvironmentAuthorization", () => {
+  it.effect("prepares a cold direct bearer connection with one descriptor request", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        responses: [
+          Response.json({
+            ...DESCRIPTOR,
+            orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
+          }),
+          websocketTicket("cold-ticket"),
+        ],
+      });
+
+      const [prepared] = yield* prepareDirectBearer(harness, 1);
+
+      expect(prepared).toMatchObject({
+        _tag: "Success",
+        success: { socketUrl: expect.stringContaining("wsTicket=cold-ticket") },
+      });
+      expect(harness.fetch.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+        "/.well-known/lief/environment",
+        "/api/auth/websocket-ticket/rpc",
+      ]);
+    }),
+  );
+
+  it.effect("renews an expired direct DPoP token with the host and keeps the renewal", () =>
+    Effect.gen(function* () {
+      const renewal = (init: RequestInit) => {
+        const fields = new URLSearchParams(
+          init.body instanceof Uint8Array ? new TextDecoder().decode(init.body) : String(init.body),
+        );
+        expect(fields.get("subject_token")).toBe("expired-direct-token");
+        expect(fields.get("subject_token_type")).toBe(
+          "urn:ietf:params:oauth:token-type:access_token",
+        );
+        return accessToken("renewed-direct-token");
+      };
+      const harness = yield* makeHarness({
+        responses: [renewal, websocketTicket("direct-ticket")],
+        descriptor: DESCRIPTOR,
+        credentials: [
+          [
+            "direct-1",
+            new DpopConnectionCredential({
+              accessToken: "expired-direct-token",
+              expiresAtEpochMs: 0,
+            }),
+          ],
+        ],
+      });
+
+      const [authorized, stored] = yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+        const authorized = yield* remote.authorizeDirectDpop({
+          expectedEnvironmentId: ENVIRONMENT_ID,
+          connectionId: "direct-1",
+          httpBaseUrl: ENDPOINT.httpBaseUrl,
+          wsBaseUrl: ENDPOINT.wsBaseUrl,
+        });
+        return [authorized, yield* credentials.get("direct-1")] as const;
+      }).pipe(Effect.provide(harness.layer));
+
+      expect(authorized.socketUrl).toContain("wsTicket=direct-ticket");
+      expect(authorized.httpAuthorization).toMatchObject({
+        _tag: "Dpop",
+        accessToken: "renewed-direct-token",
+        directConnection: { connectionId: "direct-1", httpBaseUrl: ENDPOINT.httpBaseUrl },
+      });
+      expect(Option.getOrThrow(stored)).toMatchObject({
+        _tag: "DpopConnectionCredential",
+        accessToken: "renewed-direct-token",
+      });
+      expect((yield* Ref.get(harness.proofInputs)).map((proof) => proof.url)).toEqual([
+        `${ENDPOINT.httpBaseUrl}/oauth/token`,
+        `${ENDPOINT.httpBaseUrl}/api/auth/websocket-ticket/rpc`,
+        `${ENDPOINT.httpBaseUrl}/ws`,
+      ]);
+    }),
+  );
+
+  it.effect.each([
+    { name: "read-only", scopes: ["orchestration:read"] },
+    { name: "default", scopes: AuthStandardClientScopes },
+  ] as const)("preserves $name pairing scopes on direct renewal", ({ scopes }) =>
+    Effect.gen(function* () {
+      const scope = scopes.join(" ");
+      const harness = yield* makeHarness({
+        descriptor: DESCRIPTOR,
+        credentials: [directCredential("expired-token", 0)],
+        responses: [
+          accessToken(`socket:${scope}`, scope),
+          websocketTicket("granted-ticket"),
+          accessToken(`http:${scope}`, scope),
+        ],
+      });
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+        const socket = yield* remote.authorizeDirectDpop({
+          ...DIRECT_CONNECTION,
+          expectedEnvironmentId: ENVIRONMENT_ID,
+          wsBaseUrl: ENDPOINT.wsBaseUrl,
+        });
+        expect(socket.socketUrl).toContain("wsTicket=granted-ticket");
+        expect(socket.httpAuthorization).toMatchObject({ accessToken: `socket:${scope}` });
+        yield* TestClock.adjust("1 hour");
+        expect(yield* remote.authorizeDirectDpopHttp(DIRECT_CONNECTION)).toMatchObject({
+          accessToken: `http:${scope}`,
+        });
+        expect(yield* credentials.get(DIRECT_CONNECTION.connectionId)).toMatchObject({
+          _tag: "Some",
+          value: { accessToken: `http:${scope}` },
+        });
+      }).pipe(Effect.provide(Layer.merge(harness.layer, TestClock.layer())));
+
+      const calls = harness.fetch.calls;
+      expect(calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+        "/.well-known/lief/environment",
+        "/oauth/token",
+        "/api/auth/websocket-ticket/rpc",
+        "/oauth/token",
+      ]);
+      expect(new Headers(calls[2]![1].headers).get("authorization")).toBe(`DPoP socket:${scope}`);
+      for (const [index, token] of [
+        [1, "expired-token"],
+        [3, `socket:${scope}`],
+      ] as const) {
+        const body = calls[index]![1].body;
+        const fields = new URLSearchParams(
+          body instanceof Uint8Array ? new TextDecoder().decode(body) : String(body),
+        );
+        expect(fields.get("subject_token")).toBe(token);
+        expect(fields.get("subject_token_type")).toBe(
+          "urn:ietf:params:oauth:token-type:access_token",
+        );
+        expect(fields.has("scope")).toBe(false);
+      }
+    }),
+  );
+
+  it.effect.each(["accepted", "rejected"] as const)(
+    "renews once after a direct websocket ticket is rejected and the retry is %s",
+    (outcome) =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({
+          descriptor: DESCRIPTOR,
+          credentials: [
+            directCredential("cached-token", (yield* Clock.currentTimeMillis) + 3_600_000),
+          ],
+          responses: [
+            authInvalid(),
+            accessToken("replacement-token"),
+            outcome === "accepted" ? websocketTicket("replacement-ticket") : authInvalid(),
+          ],
+        });
+        yield* Effect.gen(function* () {
+          const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+          const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+          const request = remote.authorizeDirectDpop({
+            ...DIRECT_CONNECTION,
+            expectedEnvironmentId: ENVIRONMENT_ID,
+            wsBaseUrl: ENDPOINT.wsBaseUrl,
+          });
+          if (outcome === "accepted") {
+            expect(yield* request).toMatchObject({
+              socketUrl: expect.stringContaining("wsTicket=replacement-ticket"),
+              httpAuthorization: { accessToken: "replacement-token" },
+            });
+          } else {
+            expect(yield* Effect.flip(request)).toMatchObject({
+              _tag: "ConnectionBlockedError",
+              reason: "authentication",
+            });
+          }
+          expect(yield* credentials.get(DIRECT_CONNECTION.connectionId)).toMatchObject({
+            _tag: "Some",
+            value: { accessToken: "replacement-token" },
+          });
+        }).pipe(Effect.provide(harness.layer));
+        const calls = harness.fetch.calls;
+        expect(calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+          "/.well-known/lief/environment",
+          "/api/auth/websocket-ticket/rpc",
+          "/oauth/token",
+          "/api/auth/websocket-ticket/rpc",
+        ]);
+        expect(new Headers(calls[1]![1].headers).get("authorization")).toBe("DPoP cached-token");
+        expect(new Headers(calls[3]![1].headers).get("authorization")).toBe(
+          "DPoP replacement-token",
+        );
+      }),
+  );
+
+  it.effect("does not evict a replacement token when a late request rejects the old one", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        credentials: [
+          directCredential("cached-token", (yield* Clock.currentTimeMillis) + 3_600_000),
+        ],
+        responses: [accessToken("replacement-token")],
+      });
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+        const initial = yield* remote.authorizeDirectDpopHttp(DIRECT_CONNECTION);
+        expect(initial.accessToken).toBe("cached-token");
+        expect(harness.fetch.calls).toHaveLength(0);
+
+        const first = yield* remote.authorizeDirectDpopHttp(DIRECT_CONNECTION, initial.accessToken);
+        const late = yield* remote.authorizeDirectDpopHttp(DIRECT_CONNECTION, initial.accessToken);
+        expect(first.accessToken).toBe("replacement-token");
+        expect(late).toEqual(first);
+        expect(yield* credentials.get(DIRECT_CONNECTION.connectionId)).toMatchObject({
+          _tag: "Some",
+          value: { accessToken: "replacement-token" },
+        });
+      }).pipe(Effect.provide(harness.layer));
+      expect(harness.fetch.calls.map(([url]) => String(url))).toEqual([
+        `${ENDPOINT.httpBaseUrl}/oauth/token`,
+      ]);
+    }),
+  );
+
+  it.effect.each(["success", "failure"] as const)(
+    "shares one in-flight renewal with six HTTP callers on %s",
+    (outcome) =>
+      Effect.gen(function* () {
+        const held = heldResponse();
+        const harness = yield* makeHarness({
+          credentials: [directCredential("expired-token", 0)],
+          responses: [held.response, () => accessToken("retried-token")],
+        });
+        yield* Effect.gen(function* () {
+          const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+          const authorize = remote.authorizeDirectDpopHttp(DIRECT_CONNECTION);
+          const callers = yield* Effect.forEach(Array.from({ length: 6 }), () =>
+            authorize.pipe(Effect.result, Effect.forkChild({ startImmediately: true })),
+          );
+          yield* held.started;
+          expect(harness.fetch.calls).toHaveLength(1);
+          held.respond(
+            outcome === "success"
+              ? accessToken("shared-token")
+              : new Response(null, { status: 503 }),
+          );
+          const results = yield* Effect.forEach(callers, Fiber.join);
+          expect(results).toEqual(
+            Array.from({ length: 6 }, () =>
+              outcome === "success"
+                ? expect.objectContaining({
+                    _tag: "Success",
+                    success: expect.objectContaining({ accessToken: "shared-token" }),
+                  })
+                : expect.objectContaining({
+                    _tag: "Failure",
+                    failure: expect.objectContaining({
+                      _tag: "ConnectionTransientError",
+                      reason: "remote-unavailable",
+                    }),
+                  }),
+            ),
+          );
+          expect(harness.fetch.calls).toHaveLength(1);
+          if (outcome === "failure") {
+            expect((yield* authorize).accessToken).toBe("retried-token");
+            expect(harness.fetch.calls).toHaveLength(2);
+          }
+        }).pipe(Effect.provide(harness.layer));
+      }),
+  );
+
+  it.effect("keeps a shared renewal alive when one waiting request is interrupted", () =>
+    Effect.gen(function* () {
+      const held = heldResponse();
+      const harness = yield* makeHarness({
+        credentials: [directCredential("expired-token", 0)],
+        responses: [held.response],
+      });
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const authorize = remote.authorizeDirectDpopHttp(DIRECT_CONNECTION);
+        const first = yield* authorize.pipe(Effect.forkChild);
+        yield* held.started;
+        const other = yield* authorize.pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Fiber.interrupt(first);
+        held.respond(accessToken("shared-token"));
+        const authorized = yield* Fiber.join(other);
+        expect(authorized.accessToken).toBe("shared-token");
+        expect(yield* authorize).toEqual(authorized);
+        expect(harness.fetch.calls).toHaveLength(1);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("renews another direct host while the first host is unresponsive", () =>
+    Effect.gen(function* () {
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<Response>();
+      const first = { connectionId: "direct-1", httpBaseUrl: ENDPOINT.httpBaseUrl };
+      const second = { connectionId: "direct-2", httpBaseUrl: "https://other.example.test" };
+      const harness = yield* makeHarness({
+        responses: [
+          () => {
+            started.resolve();
+            return release.promise;
+          },
+          () => accessToken("renewed-second-token"),
+        ],
+        credentials: [first, second].map(({ connectionId }) => [
+          connectionId,
+          new DpopConnectionCredential({ accessToken: connectionId, expiresAtEpochMs: 0 }),
+        ]),
+      });
+
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const pending = yield* remote.authorizeDirectDpopHttp(first).pipe(Effect.forkScoped);
+        yield* Effect.promise(() => started.promise);
+        const healthy = yield* remote
+          .authorizeDirectDpopHttp(second)
+          .pipe(Effect.timeoutOption("1 second"), Effect.forkScoped);
+        yield* TestClock.adjust("1 second");
+        expect(yield* Fiber.join(healthy)).toMatchObject({
+          _tag: "Some",
+          value: { accessToken: "renewed-second-token" },
+        });
+        release.resolve(accessToken("renewed-first-token"));
+        expect((yield* Fiber.join(pending)).accessToken).toBe("renewed-first-token");
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(harness.layer, TestClock.layer())));
+    }),
+  );
+
+  it.effect("reuses a matching descriptor a check just read, once, while fresh", () =>
+    Effect.gen(function* () {
+      const descriptor = {
+        ...DESCRIPTOR,
+        orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
+      } as ExecutionEnvironmentDescriptor;
+      const harness = yield* makeHarness({
+        responses: [
+          websocketTicket("reused"),
+          ...Array.from({ length: 4 }, () => [
+            Response.json(descriptor),
+            websocketTicket("fresh"),
+          ]).flat(),
+          websocketTicket("reused over plain HTTP"),
+          Response.json(descriptor),
+          websocketTicket("fresh"),
+        ],
+      });
+
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const authorizeAt = (httpBaseUrl: string) =>
+          remote.authorizeBearer({
+            expectedEnvironmentId: ENVIRONMENT_ID,
+            httpBaseUrl,
+            wsBaseUrl: httpBaseUrl.replace(/^http/, "ws"),
+            bearerToken: "bearer-token",
+            connectionMethod: "direct",
+          });
+        const authorize = authorizeAt(ENDPOINT.httpBaseUrl);
+        const remember = (value: Option.Option<ExecutionEnvironmentDescriptor>) =>
+          remote.rememberCheckedDescriptor(ENDPOINT.httpBaseUrl, value, true);
+
+        yield* remember(Option.some(descriptor));
+        yield* authorize;
+        // Used once.
+        yield* authorize;
+        // Stale.
+        yield* remember(Option.some(descriptor));
+        yield* TestClock.adjust("6 seconds");
+        yield* authorize;
+        // A mismatch reads again, so a host back on the right environment is not blocked.
+        yield* remember(Option.some({ ...descriptor, environmentId: "other" as never }));
+        yield* authorize;
+        // A failed check drops an older match.
+        yield* remember(Option.some(descriptor));
+        yield* remember(Option.none());
+        yield* authorize;
+        // Plain HTTP is no reason to read again where the address keeps its host.
+        yield* remote.rememberCheckedDescriptor(
+          "http://127.0.0.1:3773",
+          Option.some(descriptor),
+          true,
+        );
+        yield* authorizeAt("http://127.0.0.1:3773");
+        // After a network change, a plain LAN address can belong to another machine.
+        yield* remote.rememberCheckedDescriptor(
+          "http://192.168.1.2:3773",
+          Option.some(descriptor),
+          false,
+        );
+        yield* authorizeAt("http://192.168.1.2:3773");
+      }).pipe(Effect.provide(harness.layer));
+
+      expect(harness.fetch.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+        "/api/auth/websocket-ticket/rpc",
+        ...Array.from({ length: 4 }, () => [
+          "/.well-known/lief/environment",
+          "/api/auth/websocket-ticket/rpc",
+        ]).flat(),
+        "/api/auth/websocket-ticket/rpc",
+        "/.well-known/lief/environment",
+        "/api/auth/websocket-ticket/rpc",
+      ]);
+    }),
+  );
+
+  it.effect("blocks a warm direct bearer prepare when the environment changes identity", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        responses: [
+          Response.json({
+            ...DESCRIPTOR,
+            orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
+          }),
+          websocketTicket("first-ticket"),
+          Response.json({
+            ...DESCRIPTOR,
+            environmentId: "another-environment",
+            orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
+          }),
+        ],
+      });
+
+      const [first, second] = yield* prepareDirectBearer(harness, 2);
+
+      expect(first?._tag).toBe("Success");
+      expect(second).toMatchObject({
+        _tag: "Failure",
+        failure: { _tag: "ConnectionBlockedError", reason: "configuration" },
+      });
+      expect(
+        harness.fetch.calls.filter(([url]) =>
+          String(url).endsWith("/api/auth/websocket-ticket/rpc"),
+        ),
+      ).toHaveLength(1);
+    }),
+  );
+  it.effect("validates a fresh bearer descriptor while issuing fresh websocket tickets", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        responses: [
+          Response.json(DESCRIPTOR),
+          websocketTicket("first-ticket"),
+          Response.json(DESCRIPTOR),
+          websocketTicket("second-ticket"),
+        ],
+      });
+
+      const [first, second] = yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const authorize = () =>
+          remote.authorizeBearer({
+            expectedEnvironmentId: ENVIRONMENT_ID,
+            httpBaseUrl: ENDPOINT.httpBaseUrl,
+            wsBaseUrl: ENDPOINT.wsBaseUrl,
+            bearerToken: "bearer-token",
+            connectionMethod: "direct",
+          });
+        return [yield* authorize(), yield* authorize()] as const;
+      }).pipe(Effect.provide(harness.layer));
+
+      expect(first.socketUrl).toContain("wsTicket=first-ticket");
+      expect(second.socketUrl).toContain("wsTicket=second-ticket");
+      expect(
+        harness.fetch.calls.filter(([url]) =>
+          String(url).endsWith("/.well-known/lief/environment"),
+        ),
+      ).toHaveLength(2);
+      expect(
+        harness.fetch.calls.filter(([url]) =>
+          String(url).endsWith("/api/auth/websocket-ticket/rpc"),
+        ),
+      ).toHaveLength(2);
+    }),
+  );
+
+  it.effect("gives up on a silent loopback or LAN address sooner than on a remote one", () =>
+    Effect.gen(function* () {
+      const silent = () => new Promise<Response>(() => {});
+      const harness = yield* makeHarness({ responses: [silent, silent, silent] });
+
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const authorizeAt = (httpBaseUrl: string, connectionMethod: "direct" | "ssh" = "direct") =>
+          remote
+            .authorizeBearer({
+              expectedEnvironmentId: ENVIRONMENT_ID,
+              httpBaseUrl,
+              wsBaseUrl: httpBaseUrl.replace(/^http/, "ws"),
+              bearerToken: "bearer-token",
+              connectionMethod,
+            })
+            .pipe(Effect.flip, Effect.forkChild);
+        const lan = yield* authorizeAt("http://192.168.1.2:3773");
+        const tailnet = yield* authorizeAt("http://100.101.102.103:3773");
+        // An SSH forward listens on loopback but reaches a remote host.
+        const forwarded = yield* authorizeAt("http://127.0.0.1:4010", "ssh");
+
+        yield* TestClock.adjust("3 seconds");
+        expect(lan.pollUnsafe()).toBeDefined();
+        expect(tailnet.pollUnsafe()).toBeUndefined();
+        expect(forwarded.pollUnsafe()).toBeUndefined();
+        expect(yield* Fiber.join(lan)).toMatchObject({
+          _tag: "ConnectionTransientError",
+          reason: "timeout",
+        });
+
+        yield* TestClock.adjust("7 seconds");
+        expect(tailnet.pollUnsafe()).toBeDefined();
+        expect(forwarded.pollUnsafe()).toBeDefined();
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("sends no token to a direct address that answers as another machine", () =>
+    Effect.gen(function* () {
+      const httpBaseUrl = "http://192.168.1.10:3773/";
+      const credential = directCredential("expired-token", 0);
+      const harness = yield* makeHarness({
+        descriptor: { ...DESCRIPTOR, environmentId: EnvironmentId.make("someone-else") },
+        credentials: [credential],
+        responses: [],
+      });
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+        const error = yield* remote
+          .authorizeDirectDpop({
+            expectedEnvironmentId: ENVIRONMENT_ID,
+            connectionId: credential[0],
+            httpBaseUrl,
+            wsBaseUrl: "ws://192.168.1.10:3773/",
+          })
+          .pipe(Effect.flip);
+
+        expect(error).toMatchObject({ _tag: "ConnectionBlockedError", reason: "configuration" });
+        expect(harness.fetch.calls.map(([url]) => String(url))).toEqual([
+          `${httpBaseUrl}.well-known/lief/environment`,
+        ]);
+        expect(new Headers(harness.fetch.calls[0]?.[1].headers).has("authorization")).toBe(false);
+        expect(yield* Ref.get(harness.proofInputs)).toEqual([]);
+        expect(yield* credentials.get(credential[0])).toEqual(Option.some(credential[1]));
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
+  it.effect("renews a live direct socket in the minute before each expiry", () =>
+    Effect.gen(function* () {
+      const firstRenewal = heldResponse();
+      const secondRenewal = heldResponse();
+      const harness = yield* makeHarness({
+        credentials: [directCredential("socket-token", 3_600_000)],
+        responses: [
+          () => Promise.reject(new TypeError("network down")),
+          firstRenewal.response,
+          secondRenewal.response,
+        ],
+      });
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+        yield* remote
+          .renewDpopBeforeExpiry({
+            expectedEnvironmentId: ENVIRONMENT_ID,
+            expiresAtEpochMs: 3_600_000,
+            directConnection: DIRECT_CONNECTION,
+          })
+          .pipe(Effect.forkScoped);
+        yield* TestClock.adjust(3_539_999);
+        expect(harness.fetch.calls).toHaveLength(0);
+        yield* TestClock.adjust(1);
+        expect(harness.fetch.calls).toHaveLength(1);
+        yield* TestClock.adjust(4_999);
+        expect(harness.fetch.calls).toHaveLength(1);
+        yield* TestClock.adjust(1);
+        yield* firstRenewal.started;
+        firstRenewal.respond(accessToken("renewed-1"));
+        expect((yield* remote.authorizeDirectDpopHttp(DIRECT_CONNECTION)).accessToken).toBe(
+          "renewed-1",
+        );
+        yield* TestClock.adjust(3_539_999);
+        expect(harness.fetch.calls).toHaveLength(2);
+        yield* TestClock.adjust(1);
+        yield* secondRenewal.started;
+        secondRenewal.respond(accessToken("renewed-2"));
+        expect((yield* remote.authorizeDirectDpopHttp(DIRECT_CONNECTION)).accessToken).toBe(
+          "renewed-2",
+        );
+        expect(yield* credentials.get(DIRECT_CONNECTION.connectionId)).toEqual(
+          Option.some(directCredential("renewed-2", 10_685_000)[1]),
+        );
+        expect(harness.fetch.calls).toHaveLength(3);
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(harness.layer, TestClock.layer())));
+    }),
+  );
+
+  it.effect("requires fresh pairing when the direct token's proof key is replaced", () =>
+    Effect.gen(function* () {
+      const credential = directCredential("old-key-token", 0);
+      const harness = yield* makeHarness({
+        credentials: [credential],
+        responses: [
+          (init) => {
+            expect(new Headers(init.headers).get("dpop")).toBe(
+              `proof:thumbprint-2:${ENDPOINT.httpBaseUrl}/oauth/token`,
+            );
+            return authInvalid();
+          },
+        ],
+      });
+      yield* Ref.set(harness.thumbprint, "thumbprint-2");
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+        expect(
+          yield* remote.authorizeDirectDpopHttp(DIRECT_CONNECTION).pipe(Effect.flip),
+        ).toMatchObject({
+          _tag: "ConnectionBlockedError",
+          reason: "authentication",
+        });
+        expect(yield* credentials.get(credential[0])).toEqual(Option.some(credential[1]));
+      }).pipe(Effect.provide(harness.layer));
+      expect(harness.fetch.calls.map(([url]) => String(url))).toEqual([
+        `${ENDPOINT.httpBaseUrl}/oauth/token`,
+      ]);
+    }),
+  );
+
+  it.effect("keeps renewing a direct socket after a failed renewal past token expiry", () =>
+    Effect.gen(function* () {
+      let markLoopRenewal = () => {};
+      const loopRenewed = new Promise<void>((resolve) => (markLoopRenewal = resolve));
+      const connection = { connectionId: "direct-1", httpBaseUrl: ENDPOINT.httpBaseUrl };
+      const harness = yield* makeHarness({
+        responses: [
+          () => Promise.reject(new TypeError("network down")),
+          () => {
+            markLoopRenewal();
+            return accessToken("renewed-direct-token");
+          },
+        ],
+        credentials: [
+          [
+            "direct-1",
+            new DpopConnectionCredential({ accessToken: "direct-token", expiresAtEpochMs: 1_000 }),
+          ],
+        ],
+      });
+
+      const renewed = yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        yield* remote
+          .renewDpopBeforeExpiry({
+            expectedEnvironmentId: ENVIRONMENT_ID,
+            expiresAtEpochMs: 1_000,
+            directConnection: connection,
+          })
+          .pipe(Effect.forkScoped);
+        // The first try, at 5 s, is already past the token's expiry and fails.
+        yield* TestClock.adjust(5_000);
+        // The host keeps a direct socket for its session's window, so the loop tries again.
+        yield* TestClock.adjust(60_000);
+        yield* Effect.promise(() => loopRenewed);
+        // Waits behind the loop's renewal and reads what it stored, with no request of its own.
+        return yield* remote.authorizeDirectDpopHttp(connection);
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(harness.layer, TestClock.layer())));
+
+      expect(renewed.accessToken).toBe("renewed-direct-token");
+    }),
+  );
+});

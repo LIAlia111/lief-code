@@ -1,0 +1,150 @@
+import { describe, expect, it } from "vite-plus/test";
+
+import { summarizeLiefToolCalls, type LiefToolSummaryCall } from "./liefToolSummary.ts";
+
+function completed(input: unknown, output?: unknown): LiefToolSummaryCall {
+  return { input, output, outcome: "completed" };
+}
+
+describe("summarizeLiefToolCalls", () => {
+  it("reads provider result envelopes without treating JSON in the message as result data", () => {
+    const result = { messageId: "message-1", threadId: "actual-thread" };
+    const json = JSON.stringify(result);
+    const outputs = [
+      result,
+      { structuredContent: result },
+      [{ type: "text", text: json }],
+      { content: [{ text: { text: json } }], isError: false },
+      json,
+    ];
+    const calls = outputs.map((output) =>
+      completed(
+        {
+          toolName: "lief_thread_send",
+          args: { threadId: "input-thread", message: '{"threadId":"fake"}' },
+        },
+        output,
+      ),
+    );
+    expect(summarizeLiefToolCalls("thread-send", calls).label).toBe("Sent 1 message to 1 thread");
+    expect(
+      summarizeLiefToolCalls("thread-send", [
+        completed({ toolName: "lief_thread_send", args: { threadId: "input-thread" } }),
+        completed({ threadId: "input-thread" }),
+      ]).label,
+    ).toBe("Sent 2 messages to 1 thread");
+  });
+
+  it("counts the pull requests batch link and unlink calls changed", () => {
+    const urls = ["https://github.com/o/r/pull/1", "https://github.com/o/r/pull/1", "not-a-pr"];
+    const links = completed({ urls }, { linkedCount: 1 });
+    expect(summarizeLiefToolCalls("link-pr", [links, completed({ number: 3 })]).label).toBe(
+      "Linked 2 pull requests",
+    );
+    expect(summarizeLiefToolCalls("link-pr", [completed({ urls }, {})]).label).toBe(
+      "Linked pull requests",
+    );
+    const batch = completed({ states: ["merged"] }, { unlinkedCount: 2 });
+    expect(summarizeLiefToolCalls("unlink-pr", [batch, completed({ number: 3 })]).label).toBe(
+      "Unlinked 3 pull requests",
+    );
+    const uncounted = completed({ states: ["merged"] }, { isError: false });
+    expect(summarizeLiefToolCalls("unlink-pr", [uncounted]).label).toBe("Unlinked pull requests");
+  });
+
+  it("tells opened and merged pull requests from found ones and auto-merges", () => {
+    const create = (created: boolean) => completed({ title: "t" }, { number: 1, created });
+    expect(summarizeLiefToolCalls("create-pr", [create(true)]).label).toBe("Opened 1 pull request");
+    expect(summarizeLiefToolCalls("create-pr", [create(false)]).label).toBe(
+      "Found 1 open pull request",
+    );
+    expect(summarizeLiefToolCalls("create-pr", [create(true), create(false)]).label).toBe(
+      "Opened 1 pull request, found 1 open",
+    );
+    const merge = (auto: boolean, state: string) => completed({ auto }, { number: 1, state });
+    expect(summarizeLiefToolCalls("merge-pr", [merge(false, "merged")]).label).toBe(
+      "Merged 1 pull request",
+    );
+    expect(summarizeLiefToolCalls("merge-pr", [merge(false, "open")]).label).toBe(
+      "Queued 1 pull request to merge",
+    );
+    expect(summarizeLiefToolCalls("merge-pr", [merge(true, "open")]).label).toBe(
+      "Queued 1 pull request to merge",
+    );
+    expect(
+      summarizeLiefToolCalls("merge-pr", [merge(true, "merged"), merge(true, "open")]).label,
+    ).toBe("Merged 1 pull request, queued 1");
+    expect(summarizeLiefToolCalls("review-pr", [completed({ verdict: "approve" }, {})]).label).toBe(
+      "Reviewed 1 pull request",
+    );
+  });
+
+  it("counts the checks a CI rerun restarted, and the ones the host refused", () => {
+    const rerun = (...outcomes: boolean[]) =>
+      completed(
+        {},
+        { checks: outcomes.map((outcome, index) => ({ name: `c${index}`, rerun: outcome })) },
+      );
+    expect(summarizeLiefToolCalls("ci-rerun", [rerun(true, true)])).toEqual({
+      label: "Re-ran 2 checks",
+      failedCount: 0,
+    });
+    expect(summarizeLiefToolCalls("ci-rerun", [rerun(true, false)])).toEqual({
+      label: "Re-ran 1 check, 1 refused",
+      failedCount: 1,
+    });
+    expect(summarizeLiefToolCalls("ci-rerun", [rerun(false)])).toEqual({
+      label: "Could not re-run 1 check",
+      failedCount: 1,
+    });
+    expect(summarizeLiefToolCalls("ci-rerun", [rerun()]).label).toBe(
+      "Found no failed checks to re-run",
+    );
+  });
+
+  it("excludes failed and unfinished sends even if the provider reports completed", () => {
+    const calls: LiefToolSummaryCall[] = [
+      completed({ threadId: "success" }, { messageId: "ok", threadId: "success" }),
+      completed(
+        { threadId: "failed" },
+        { isError: true, structuredContent: { threadId: "failed" } },
+      ),
+      completed({ threadId: "failed" }, [
+        { type: "text", text: JSON.stringify({ _tag: "OrchestratorMcpFailure" }) },
+      ]),
+      { input: { threadId: "cancelled" }, output: undefined, outcome: "unfinished" },
+    ];
+    expect(summarizeLiefToolCalls("thread-send", calls)).toEqual({
+      label: "Sent 1 message to 1 thread",
+      failedCount: 2,
+    });
+    expect(summarizeLiefToolCalls("thread-send", [calls[1]!])).toEqual({
+      label: "Tried to send 1 message to 1 thread",
+      failedCount: 1,
+    });
+  });
+
+  it("does not confuse a child's failure or wait timeout with failure of the orchestration call", () => {
+    const failedChild = { taskId: "task-1", status: "failed", summary: "command not found" };
+    expect(
+      summarizeLiefToolCalls("delegate", [completed({}, failedChild), completed({}, failedChild)]),
+    ).toEqual({
+      label: "Delegated 1 task",
+      failedCount: 0,
+    });
+    expect(
+      summarizeLiefToolCalls(
+        "task-status",
+        Array.from({ length: 4 }, () => completed({ taskId: "task-1" }, failedChild)),
+      ).label,
+    ).toBe("Checked task status 4 times");
+    expect(
+      summarizeLiefToolCalls("thread-wait", [
+        completed({ threadId: "thread-1" }, { threadId: "thread-1", timedOut: true }),
+      ]),
+    ).toEqual({
+      label: "Waited on 1 thread",
+      failedCount: 0,
+    });
+  });
+});
