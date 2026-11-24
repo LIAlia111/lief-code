@@ -20,7 +20,13 @@ async function output(relativePath: string, contents: string | Buffer) {
     await NodeFSP.writeFile(file, contents);
     return;
   }
-  if (!(await NodeFSP.readFile(file)).equals(Buffer.from(contents))) {
+  const current = await NodeFSP.readFile(file);
+  // The formatter owns the layout of committed JSON, so only its content has to match.
+  const same = relativePath.endsWith(".json")
+    ? JSON.stringify(JSON.parse(current.toString())) ===
+      JSON.stringify(JSON.parse(String(contents)))
+    : current.equals(Buffer.from(contents));
+  if (!same) {
     throw new Error("Stale icon asset: " + relativePath);
   }
 }
